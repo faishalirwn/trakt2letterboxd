@@ -9,6 +9,19 @@ import csv
 import json
 from datetime import datetime
 import sys
+import os
+
+
+# Try to load config from config.json if it exists
+def load_config_json():
+    config_path = os.path.join(os.path.dirname(__file__), "config.json")
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Warning: Could not read config.json: {e}")
+    return {}
 
 
 class TraktExporter:
@@ -20,6 +33,7 @@ class TraktExporter:
             "Content-Type": "application/json",
             "trakt-api-version": "2",
             "trakt-api-key": client_id,
+            "User-Agent": "trakt-exporter-letterboxd/1.0",
         }
 
     def make_request(self, endpoint, params=None):
@@ -48,12 +62,12 @@ class TraktExporter:
         """Convert Trakt rating (1-10) to Letterboxd rating (0.5-5.0)"""
         if not trakt_rating:
             return ""
-        
+
         # Trakt: 1-10 (integers only)
         # Letterboxd: 0.5-5.0 (half-star increments)
         # Simple division by 2
         letterboxd_rating = trakt_rating / 2.0
-        
+
         # Format to one decimal place
         return f"{letterboxd_rating:.1f}"
 
@@ -232,6 +246,19 @@ class TraktExporter:
             print("❌ No movie data to export")
             return False
 
+        # Sort by WatchedDate (descending, most recent first)
+        def parse_date(date_str):
+            try:
+                return (
+                    datetime.strptime(date_str, "%Y-%m-%d")
+                    if date_str
+                    else datetime.min
+                )
+            except Exception:
+                return datetime.min
+
+        csv_data.sort(key=lambda row: parse_date(row["WatchedDate"]), reverse=True)
+
         # Write CSV file
         print(f"💾 Writing CSV file: {filename}")
         try:
@@ -270,21 +297,26 @@ def main():
     print("🎬 Trakt.tv to Letterboxd CSV Exporter")
     print("=" * 40)
 
-    # Get user input
-    username = input("Enter your Trakt username: ").strip()
+    # Try config.json first, then env, then prompt
+    config = load_config_json()
+    username = config.get("TRAKT_USERNAME") or os.environ.get("TRAKT_USERNAME")
+    client_id = config.get("TRAKT_CLIENT_ID") or os.environ.get("TRAKT_CLIENT_ID")
+
     if not username:
-        print("❌ Username is required")
-        sys.exit(1)
+        username = input("Enter your Trakt username: ").strip()
+        if not username:
+            print("❌ Username is required")
+            sys.exit(1)
 
-    print("\nTo get your Client ID:")
-    print("1. Go to https://trakt.tv/oauth/applications")
-    print("2. Create a new application")
-    print("3. Copy the Client ID\n")
-
-    client_id = input("Enter your Trakt Client ID: ").strip()
     if not client_id:
-        print("❌ Client ID is required")
-        sys.exit(1)
+        print("\nTo get your Client ID:")
+        print("1. Go to https://trakt.tv/oauth/applications")
+        print("2. Create a new application")
+        print("3. Copy the Client ID\n")
+        client_id = input("Enter your Trakt Client ID: ").strip()
+        if not client_id:
+            print("❌ Client ID is required")
+            sys.exit(1)
 
     # Ask about debug mode
     debug_input = (
